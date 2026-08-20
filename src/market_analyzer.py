@@ -27,10 +27,12 @@ from src.search_service import SearchService
 from src.core.market_profile import get_profile, MarketProfile
 from src.core.market_strategy import get_market_strategy_blueprint
 from src.llm.backend_registry import (
+    LOCAL_CLI_GENERATION_BACKEND_IDS,
+    LITELLM_BACKEND_ID,
     resolve_generation_backend_id,
     resolve_generation_fallback_backend_id,
 )
-from src.llm.generation_backend import GenerationError
+from src.llm.generation_backend import GenerationError, GenerationResult
 from src.schemas.market_light import MARKET_LIGHT_REGIONS, MarketLightSnapshot
 from src.services.run_diagnostics import record_llm_run, record_llm_run_started
 from src.services.intelligence_service import IntelligenceService
@@ -807,17 +809,17 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         logger.info("[大盘] %s action=generate_review status=start", self._log_context())
         # Use public analyzer APIs so diagnostics reflect the actual execution backend.
         llm_started_at = time.perf_counter()
-        provider, model = self.analyzer.get_generation_backend_identity()
+        provider, model = self._get_analyzer_generation_backend_identity()
         try:
             record_llm_run_started(
                 provider=provider,
                 model=model,
                 call_type="market_review",
             )
-            generation_result = self.analyzer.generate_text_with_metadata(
+            generation_result = self._generate_market_review_with_metadata(
                 prompt,
-                max_tokens=8192,
-                temperature=0.7,
+                provider=provider,
+                model=model,
             )
             review = generation_result.text if generation_result else None
             generation_diagnostics = (
@@ -908,6 +910,70 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             return None
         error = method()
         return error if isinstance(error, GenerationError) else None
+
+    def _get_configured_generation_backend_identity(self) -> tuple[str, str]:
+        """Best-effort backend identity for legacy analyzers without metadata APIs."""
+        backend_id = str(getattr(self.config, "generation_backend", "") or "").strip().lower()
+        if not backend_id:
+            backend_id = LITELLM_BACKEND_ID
+        if backend_id in LOCAL_CLI_GENERATION_BACKEND_IDS:
+            return backend_id, backend_id
+        return backend_id, str(getattr(self.config, "litellm_model", "") or "")
+
+    def _get_analyzer_generation_backend_identity(self) -> tuple[str, str]:
+        """Use analyzer metadata API when available, otherwise fall back to configured identity."""
+        if self.analyzer is None:
+            return self._get_configured_generation_backend_identity()
+        missing = object()
+        if getattr_static(self.analyzer, "get_generation_backend_identity", missing) is not missing:
+            method = getattr(self.analyzer, "get_generation_backend_identity", None)
+            if callable(method):
+                return method()
+        return self._get_configured_generation_backend_identity()
+
+    def _generate_market_review_with_metadata(
+        self,
+        prompt: str,
+        *,
+        provider: str,
+        model: str,
+    ) -> Optional[GenerationResult]:
+        """Support legacy analyzers that only implement the public generate_text() contract."""
+        if self.analyzer is None:
+            return None
+        missing = object()
+        if getattr_static(self.analyzer, "generate_text_with_metadata", missing) is not missing:
+            method = getattr(self.analyzer, "generate_text_with_metadata", None)
+            if callable(method):
+                return method(
+                    prompt,
+                    max_tokens=8192,
+                    temperature=0.7,
+                )
+
+        if getattr_static(self.analyzer, "generate_text", missing) is missing:
+            raise AttributeError(
+                "analyzer must implement generate_text_with_metadata() or generate_text()"
+            )
+        legacy_method = getattr(self.analyzer, "generate_text", None)
+        if not callable(legacy_method):
+            raise AttributeError(
+                "analyzer must implement generate_text_with_metadata() or generate_text()"
+            )
+        review = legacy_method(
+            prompt,
+            max_tokens=8192,
+            temperature=0.7,
+        )
+        if review is None:
+            return None
+        return GenerationResult(
+            text=review,
+            provider=provider,
+            model=model,
+            backend=provider,
+            usage={},
+        )
 
     def build_market_review_payload(
         self,

@@ -3296,6 +3296,87 @@ class TestMarketAnalyzerBypassFix:
         assert kwargs["max_tokens"] == 8192
         assert kwargs["temperature"] == 0.7
 
+    def test_market_review_supports_legacy_injected_analyzer_contract(self):
+        from src.market_analyzer import MarketOverview
+
+        class LegacyAnalyzer:
+            def __init__(self):
+                self.calls = []
+
+            def is_available(self):
+                return True
+
+            def generate_text(self, prompt, max_tokens=2048, temperature=0.7):
+                self.calls.append(
+                    {
+                        "prompt": prompt,
+                        "max_tokens": max_tokens,
+                        "temperature": temperature,
+                    }
+                )
+                return "复盘结果"
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value="unused")
+        ma.analyzer = LegacyAnalyzer()
+
+        with patch.object(ma, "_build_review_prompt", return_value="legacy prompt"), \
+             patch.object(ma, "_inject_data_into_review", return_value="渲染后复盘"), \
+             patch("src.market_analyzer.record_llm_run_started") as started, \
+             patch("src.market_analyzer.record_llm_run") as recorded:
+            result = ma.generate_market_review(MarketOverview(date="2026-03-05"), [])
+
+        assert result == "渲染后复盘"
+        assert ma.analyzer.calls == [
+            {
+                "prompt": "legacy prompt",
+                "max_tokens": 8192,
+                "temperature": 0.7,
+            }
+        ]
+        assert started.call_args.kwargs["provider"] == "litellm"
+        assert started.call_args.kwargs["model"] == ma.config.litellm_model
+        assert recorded.call_args.kwargs["provider"] == "gemini"
+        assert recorded.call_args.kwargs["model"] == ma.config.litellm_model
+
+    def test_market_review_legacy_injected_analyzer_ignores_invalid_backend_config(self):
+        from src.market_analyzer import MarketOverview
+
+        class LegacyAnalyzer:
+            def __init__(self):
+                self.calls = []
+
+            def is_available(self):
+                return True
+
+            def generate_text(self, prompt, max_tokens=2048, temperature=0.7):
+                self.calls.append(
+                    {
+                        "prompt": prompt,
+                        "max_tokens": max_tokens,
+                        "temperature": temperature,
+                    }
+                )
+                return "复盘结果"
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value="unused")
+        ma.analyzer = LegacyAnalyzer()
+        ma.config.generation_backend = "broken-backend"
+
+        with patch.object(ma, "_build_review_prompt", return_value="legacy prompt"), \
+             patch.object(ma, "_inject_data_into_review", return_value="渲染后复盘"), \
+             patch("src.market_analyzer.record_llm_run_started"), \
+             patch("src.market_analyzer.record_llm_run"):
+            result = ma.generate_market_review(MarketOverview(date="2026-03-05"), [])
+
+        assert result == "渲染后复盘"
+        assert ma.analyzer.calls == [
+            {
+                "prompt": "legacy prompt",
+                "max_tokens": 8192,
+                "temperature": 0.7,
+            }
+        ]
+
     def test_market_review_records_actual_codex_backend(self):
         from src.market_analyzer import MarketOverview
 
