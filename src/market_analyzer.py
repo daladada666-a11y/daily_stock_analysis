@@ -182,6 +182,10 @@ class MarketAnalyzer:
             if deployment_model.lower() != normalized_response_model:
                 continue
 
+            normalized_deployment_model = deployment_model.lower()
+            if normalized_deployment_model.startswith("openai/~") or "openrouter" in normalized_deployment_model:
+                return "openrouter"
+
             _resolved_model, resolved_provider = resolved_model_provider_identity(
                 deployment_model,
             )
@@ -213,14 +217,18 @@ class MarketAnalyzer:
             normalized_route = str(resolved_route_model or normalized_model).strip().lower()
             if normalized_route.startswith("openai/~") or "openrouter" in normalized_route:
                 resolved_route_provider = "openrouter"
-        if normalized_usage_provider:
-            return normalized_usage_provider
+        resolved_response_provider = ""
         if normalized_response_model:
             resolved_response_provider = self._resolve_configured_response_provider(
                 normalized_model,
                 normalized_response_model,
                 getattr(self.config, "llm_model_list", None) or [],
             )
+            if resolved_response_provider == "openrouter":
+                return resolved_response_provider
+        if normalized_usage_provider:
+            return normalized_usage_provider
+        if normalized_response_model:
             if resolved_response_provider:
                 return resolved_response_provider
             if resolved_route_provider == "openrouter":

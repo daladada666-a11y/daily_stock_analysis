@@ -2839,6 +2839,10 @@ class GeminiAnalyzer:
             if deployment_model.lower() != normalized_response_model:
                 continue
 
+            normalized_deployment_model = deployment_model.lower()
+            if normalized_deployment_model.startswith("openai/~") or "openrouter" in normalized_deployment_model:
+                return "openrouter"
+
             _resolved_model, resolved_provider = resolved_model_provider_identity(
                 deployment_model,
             )
