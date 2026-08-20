@@ -40,6 +40,7 @@ from data_provider.base import DataFetcherManager
 
 logger = logging.getLogger(__name__)
 
+_LEGACY_ANALYZER_BACKEND_ID = "legacy_analyzer"
 
 _ENGLISH_SECTION_PATTERNS = {
     "market_summary": r"###\s*(?:1\.\s*)?Market Summary",
@@ -920,6 +921,10 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             return backend_id, backend_id
         return backend_id, str(getattr(self.config, "litellm_model", "") or "")
 
+    def _get_legacy_analyzer_generation_backend_identity(self) -> tuple[str, str]:
+        """Return a neutral identity for injected analyzers that expose no metadata APIs."""
+        return _LEGACY_ANALYZER_BACKEND_ID, _LEGACY_ANALYZER_BACKEND_ID
+
     def _get_analyzer_generation_backend_identity(self) -> tuple[str, str]:
         """Use analyzer metadata API when available, otherwise fall back to configured identity."""
         if self.analyzer is None:
@@ -929,7 +934,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             method = getattr(self.analyzer, "get_generation_backend_identity", None)
             if callable(method):
                 return method()
-        return self._get_configured_generation_backend_identity()
+        return self._get_legacy_analyzer_generation_backend_identity()
 
     def _generate_market_review_with_metadata(
         self,
