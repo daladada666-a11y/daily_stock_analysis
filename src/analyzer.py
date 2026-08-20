@@ -2815,6 +2815,37 @@ class GeminiAnalyzer:
             return obj.get(key)
         return getattr(obj, key, None)
 
+    @staticmethod
+    def _resolve_configured_response_provider(
+        configured_model: str,
+        response_model: str,
+        model_list: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        """Match the actual response model against all deployments of one alias."""
+        normalized_configured_model = str(configured_model or "").strip()
+        normalized_response_model = str(response_model or "").strip().lower()
+        if not normalized_configured_model or not normalized_response_model or not model_list:
+            return ""
+
+        for entry in model_list:
+            params = entry.get("litellm_params", {}) or {}
+            model_name = str(entry.get("model_name") or "").strip()
+            if not model_name:
+                model_name = str(params.get("model") or "").strip()
+            if model_name != normalized_configured_model:
+                continue
+
+            deployment_model = str(params.get("model") or "").strip()
+            if deployment_model.lower() != normalized_response_model:
+                continue
+
+            _resolved_model, resolved_provider = resolved_model_provider_identity(
+                deployment_model,
+            )
+            if resolved_provider:
+                return resolved_provider
+        return ""
+
     def _resolve_response_model_provider(
         self,
         response: Any,
@@ -2838,9 +2869,16 @@ class GeminiAnalyzer:
         if response_model:
             if "/" not in response_model:
                 return response_model, configured_provider
-            response_provider = get_explicit_llm_channel_model_provider(response_model)
+            matched_provider = self._resolve_configured_response_provider(
+                normalized_configured_model,
+                response_model,
+                model_list,
+            )
+            if matched_provider:
+                return response_model, matched_provider
             if configured_provider == "openrouter":
                 return response_model, configured_provider
+            response_provider = get_explicit_llm_channel_model_provider(response_model)
             if response_provider:
                 return response_model, response_provider
             return response_model, configured_provider

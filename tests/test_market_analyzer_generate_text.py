@@ -341,6 +341,38 @@ class TestAnalyzerGenerateText:
         assert result.usage["provider"] == "openrouter"
         assert result.usage["response_model"] == "anthropic/claude-sonnet-4.6"
 
+    def test_generate_text_with_metadata_prefers_actual_response_model_provider_for_openrouter_first_duplicate_aliases(self):
+        analyzer = self._make_analyzer()
+        analyzer._config_override.generation_backend = "litellm"
+        analyzer._config_override.generation_fallback_backend = ""
+        analyzer._config_override.litellm_model = "analysis-route"
+        analyzer._config_override.litellm_fallback_models = []
+        analyzer._config_override.llm_model_list = [
+            {
+                "model_name": "analysis-route",
+                "litellm_params": {"model": "openai/~anthropic/claude-sonnet-latest"},
+            },
+            {
+                "model_name": "analysis-route",
+                "litellm_params": {"model": "anthropic/claude-sonnet-4.6"},
+            },
+        ]
+        response = SimpleNamespace(
+            model="anthropic/claude-sonnet-4.6",
+            choices=[SimpleNamespace(message=SimpleNamespace(content="复盘"))],
+            usage=None,
+        )
+
+        with patch.object(analyzer, "_dispatch_litellm_completion", return_value=response):
+            result = analyzer.generate_text_with_metadata("写一份复盘")
+
+        assert result is not None
+        assert result.backend == "litellm"
+        assert result.model == "anthropic/claude-sonnet-4.6"
+        assert result.provider == "anthropic"
+        assert result.usage["provider"] == "anthropic"
+        assert result.usage["response_model"] == "anthropic/claude-sonnet-4.6"
+
     @pytest.mark.parametrize(
         "configured_model,response_model",
         [
@@ -3413,6 +3445,38 @@ class TestMarketAnalyzerBypassFix:
         assert started.call_args.kwargs["provider"] == "codex_cli"
         assert started.call_args.kwargs["model"] == "codex_cli"
         assert recorded.call_args.kwargs["provider"] == "openrouter"
+        assert recorded.call_args.kwargs["model"] == "analysis-route"
+
+    def test_market_review_prefers_actual_response_model_provider_for_openrouter_first_duplicate_aliases(self):
+        from src.market_analyzer import MarketOverview
+
+        ma = self._make_market_analyzer_with_mock_generate_text("复盘结果")
+        ma.analyzer.get_generation_backend_identity.return_value = ("codex_cli", "codex_cli")
+        ma.config.llm_model_list = [
+            {
+                "model_name": "analysis-route",
+                "litellm_params": {"model": "openai/~anthropic/claude-sonnet-latest"},
+            },
+            {
+                "model_name": "analysis-route",
+                "litellm_params": {"model": "anthropic/claude-sonnet-4.6"},
+            },
+        ]
+        ma.analyzer.generate_text_with_metadata.return_value = SimpleNamespace(
+            text="复盘结果",
+            provider="openrouter",
+            model="analysis-route",
+            backend="litellm",
+            usage={"response_model": "anthropic/claude-sonnet-4.6"},
+        )
+
+        with patch("src.market_analyzer.record_llm_run_started") as started, \
+             patch("src.market_analyzer.record_llm_run") as recorded:
+            ma.generate_market_review(MarketOverview(date="2026-03-05"), [])
+
+        assert started.call_args.kwargs["provider"] == "codex_cli"
+        assert started.call_args.kwargs["model"] == "codex_cli"
+        assert recorded.call_args.kwargs["provider"] == "anthropic"
         assert recorded.call_args.kwargs["model"] == "analysis-route"
 
     def test_market_review_records_failed_fallback_last_model(self):

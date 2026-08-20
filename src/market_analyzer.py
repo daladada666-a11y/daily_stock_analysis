@@ -155,6 +155,37 @@ class MarketAnalyzer:
     def _log_context(self) -> str:
         return f"component=market_review region={self.region}"
 
+    @staticmethod
+    def _resolve_configured_response_provider(
+        configured_model: str,
+        response_model: str,
+        model_list: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        """Match the actual response model against all deployments of one alias."""
+        normalized_configured_model = str(configured_model or "").strip()
+        normalized_response_model = str(response_model or "").strip().lower()
+        if not normalized_configured_model or not normalized_response_model or not model_list:
+            return ""
+
+        for entry in model_list:
+            params = entry.get("litellm_params", {}) or {}
+            model_name = str(entry.get("model_name") or "").strip()
+            if not model_name:
+                model_name = str(params.get("model") or "").strip()
+            if model_name != normalized_configured_model:
+                continue
+
+            deployment_model = str(params.get("model") or "").strip()
+            if deployment_model.lower() != normalized_response_model:
+                continue
+
+            _resolved_model, resolved_provider = resolved_model_provider_identity(
+                deployment_model,
+            )
+            if resolved_provider:
+                return resolved_provider
+        return ""
+
     def _resolve_recorded_provider(
         self,
         *,
@@ -170,7 +201,6 @@ class MarketAnalyzer:
         normalized_usage_provider = str(usage_provider or "").strip()
         normalized_response_model = str(response_model or "").strip()
         normalized_provider = str(provider or "").strip()
-        resolved_route_model = ""
         resolved_route_provider = ""
         if normalized_backend == "litellm" and normalized_model:
             resolved_route_model, resolved_route_provider = resolved_model_provider_identity(
@@ -179,10 +209,19 @@ class MarketAnalyzer:
             )
             normalized_route = str(resolved_route_model or normalized_model).strip().lower()
             if normalized_route.startswith("openai/~") or "openrouter" in normalized_route:
-                return "openrouter"
+                resolved_route_provider = "openrouter"
         if normalized_usage_provider:
             return normalized_usage_provider
         if normalized_response_model:
+            resolved_response_provider = self._resolve_configured_response_provider(
+                normalized_model,
+                normalized_response_model,
+                getattr(self.config, "llm_model_list", None) or [],
+            )
+            if resolved_response_provider:
+                return resolved_response_provider
+            if resolved_route_provider == "openrouter":
+                return resolved_route_provider
             _wire_model, resolved_provider = resolved_model_provider_identity(
                 normalized_response_model,
             )
