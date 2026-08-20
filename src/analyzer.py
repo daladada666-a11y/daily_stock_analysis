@@ -3485,15 +3485,19 @@ class GeminiAnalyzer:
                     logger=logger,
                 )
 
+                response_model, response_provider = self._resolve_response_model_provider(
+                    response,
+                    fallback_provider=usage_provider,
+                    configured_model=model,
+                    model_list=recovery_model_list,
+                )
+                actual_model = response_model or model
+                if response_model:
+                    last_model = actual_model
+                if response_provider:
+                    last_provider = response_provider
                 content = self._extract_completion_text(response)
                 if content:
-                    response_model, response_provider = self._resolve_response_model_provider(
-                        response,
-                        fallback_provider=usage_provider,
-                        configured_model=model,
-                        model_list=recovery_model_list,
-                    )
-                    actual_model = response_model or model
                     usage_messages = None if audit_context is not None else call_kwargs["messages"]
                     usage = self._normalize_usage(
                         extract_usage_payload(response),

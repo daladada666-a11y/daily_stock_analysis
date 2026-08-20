@@ -625,6 +625,36 @@ class TestAnalyzerGenerateText:
         assert exc_info.value.last_model == "openai/~anthropic/claude-sonnet-latest"
         assert exc_info.value.last_provider == "openrouter"
 
+    def test_call_litellm_impl_preserves_response_model_for_empty_router_response(self):
+        from src.analyzer import _AllModelsFailedError
+
+        analyzer = self._make_analyzer()
+        analyzer._router = MagicMock()
+        analyzer._config_override.litellm_model = "analysis-route"
+        analyzer._config_override.litellm_fallback_models = []
+        analyzer._config_override.llm_model_list = [
+            {
+                "model_name": "analysis-route",
+                "litellm_params": {"model": "openai/~anthropic/claude-sonnet-latest"},
+            },
+        ]
+
+        response = SimpleNamespace(
+            model="anthropic/claude-sonnet-4.6",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=None))],
+            usage=None,
+        )
+
+        with patch.object(analyzer, "_dispatch_litellm_completion", return_value=response):
+            with pytest.raises(_AllModelsFailedError) as exc_info:
+                analyzer._call_litellm_impl(
+                    "写一份复盘",
+                    {"max_tokens": 128, "temperature": 0.7},
+                )
+
+        assert exc_info.value.last_model == "anthropic/claude-sonnet-4.6"
+        assert exc_info.value.last_provider == "openrouter"
+
     def test_call_litellm_impl_prefers_transport_provider_for_unqualified_failure_model(self):
         from src.analyzer import _AllModelsFailedError
 
@@ -3700,6 +3730,49 @@ class TestMarketAnalyzerBypassFix:
         assert recorded.call_args.kwargs["provider"] == "openrouter"
         assert recorded.call_args.kwargs["model"] == "openai/~anthropic/claude-sonnet-latest"
         assert recorded.call_args.kwargs["success"] is False
+
+    def test_market_review_records_response_model_for_empty_router_response_failure(self):
+        from src.market_analyzer import MarketOverview
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        ma.analyzer._router = MagicMock()
+        ma.analyzer._config_override.generation_backend = "litellm"
+        ma.analyzer._config_override.generation_fallback_backend = ""
+        ma.analyzer._config_override.litellm_model = "analysis-route"
+        ma.analyzer._config_override.litellm_fallback_models = []
+        ma.analyzer._config_override.llm_model_list = [
+            {
+                "model_name": "analysis-route",
+                "litellm_params": {"model": "openai/~anthropic/claude-sonnet-latest"},
+            },
+        ]
+        ma.config.llm_model_list = ma.analyzer._config_override.llm_model_list
+        ma.analyzer.get_generation_backend_identity.return_value = ("litellm", "analysis-route")
+        ma.analyzer.get_generation_backend_config_error = MagicMock(return_value=None)
+        ma.analyzer.generate_text_with_metadata = ma.analyzer.__class__.generate_text_with_metadata.__get__(
+            ma.analyzer,
+            ma.analyzer.__class__,
+        )
+        response = SimpleNamespace(
+            model="anthropic/claude-sonnet-4.6",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=None))],
+            usage=None,
+        )
+
+        with patch.object(ma.analyzer, "_dispatch_litellm_completion", return_value=response), \
+             patch.object(ma, "_generate_template_review", wraps=ma._generate_template_review) as template_review, \
+             patch("src.market_analyzer.record_llm_run_started") as started, \
+             patch("src.market_analyzer.record_llm_run") as recorded:
+            result = ma.generate_market_review(MarketOverview(date="2026-03-05"), [])
+
+        assert isinstance(result, str) and len(result) > 0
+        template_review.assert_called_once()
+        assert started.call_args.kwargs["provider"] == "litellm"
+        assert started.call_args.kwargs["model"] == "analysis-route"
+        assert recorded.call_args.kwargs["provider"] == "openrouter"
+        assert recorded.call_args.kwargs["model"] == "anthropic/claude-sonnet-4.6"
+        assert recorded.call_args.kwargs["success"] is False
+        assert recorded.call_args.kwargs["error_type"] == "AllModelsFailed"
 
     def test_market_review_records_nested_fallback_route_on_failure(self):
         from src.llm.generation_backend import GenerationBackend, GenerationError, GenerationErrorCode
