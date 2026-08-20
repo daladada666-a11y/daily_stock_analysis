@@ -2946,7 +2946,11 @@ class GeminiAnalyzer:
                 candidate_model,
                 recovery_model_list,
             )
+            normalized_route = str(resolved_model or candidate_model).strip().lower()
             explicit_provider = get_explicit_llm_channel_model_provider(candidate_model)
+            route_text = f"{candidate_provider} {normalized_route}".strip().lower()
+            if normalized_route.startswith("openai/~") or "openrouter" in route_text:
+                return resolved_model or candidate_model, "openrouter"
             if candidate_provider and not explicit_provider:
                 return resolved_model or candidate_model, candidate_provider
             if resolved_provider:
