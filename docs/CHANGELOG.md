@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 > For user-friendly release highlights, see the [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) page.
 
 ## [Unreleased]
+- [新功能] 新增妙想（MX_API）金融资讯搜索兜底源：挂在 SearXNG 之后返回结构化新闻/公告/研报，`mx_apikey` 已纳入搜索能力探测与题材搜索子进程重建参数
 - [新功能] 新增妙想（MX_API）补充数据源 `MX_APIKEY`/`MX_PRIORITY`：东财公开接口失败或限流时兜底获取筹码分布与个股资金流，补充调用受剩余阶段预算硬约束；已接线默认 GitHub Actions 工作流与 Web 设置注册表
 
 - [改进] PR CI 增加文档路径检测：仅修改普通文档、非治理 Markdown 或 LICENSE 时跳过后端测试分片、Docker、Web 与桌面打包，保留轻量治理和门禁汇总；契约文档、静态 API 规格与测试 fixture 仍执行后端回归。

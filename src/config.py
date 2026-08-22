@@ -2997,6 +2997,7 @@ class Config:
             or self.tavily_api_keys
             or self.brave_api_keys
             or self.serpapi_keys
+            or getattr(self, "mx_apikey", None)
             or self.has_searxng_enabled()
         )
 
