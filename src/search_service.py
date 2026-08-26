@@ -2267,21 +2267,27 @@ class MiaoxiangSearchProvider(BaseSearchProvider):
                     error_message=f"MX status={payload.get('status')} {str(payload.get('message',''))[:80]}",
                     search_time=time.time() - start_time,
                 )
-            items = (
-                payload.get("data", {})
-                .get("data", {})
-                .get("llmSearchResponse", {})
-                .get("data", [])
-            )
-            if not isinstance(items, list):
-                items = []
+            # 兼容两种官方返回形态（有限的显式候选路径，不做递归兜底）：
+            #   A. 实测形态:  data.data.llmSearchResponse.data
+            #   B. 公开文档:  data.llmSearchResponse.data
+            items: List[Any] = []
+            data_node = payload.get("data")
+            if isinstance(data_node, dict):
+                inner = data_node.get("data") if isinstance(data_node.get("data"), dict) else {}
+                for container in (inner, data_node):
+                    search_response = container.get("llmSearchResponse")
+                    if isinstance(search_response, dict) and isinstance(search_response.get("data"), list):
+                        items = search_response["data"]
+                        break
 
             results: List[SearchResult] = []
             for item in items:
                 if not isinstance(item, dict):
                     continue
                 title = str(item.get("title", "")).strip()
-                content = re.sub(r"<[^>]+>", " ", str(item.get("content", "") or ""))
+                # 公开文档正文字段为 trunk；实测接口返回 content —— 两者都兼容
+                raw_body = str(item.get("trunk") or item.get("content") or "")
+                content = re.sub(r"<[^>]+>", " ", raw_body)
                 content = re.sub(r"\s+", " ", content).strip()
                 if not title and not content:
                     continue
